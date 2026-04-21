@@ -73,6 +73,13 @@ function updateOptions(patch: Partial<GlobalOptions>): void {
   notify();
 }
 
+function sortImagesByName(): void {
+  state.images = [...state.images].sort((a, b) =>
+    a.file.name.localeCompare(b.file.name, undefined, { numeric: true, sensitivity: 'base' }),
+  );
+  notify();
+}
+
 export const store = {
   subscribe,
   getState,
@@ -82,4 +89,5 @@ export const store = {
   reorderImages,
   updateImageRotate,
   updateOptions,
+  sortImagesByName,
 };

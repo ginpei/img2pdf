@@ -1,4 +1,5 @@
 import { store } from '../store.js';
+import { generatePdf } from '../pdf.js';
 import type { Orientation, PageSize, ResizeMode } from '../types.js';
 
 export function createOptionsPanel(): HTMLElement {
@@ -87,6 +88,12 @@ export function createOptionsPanel(): HTMLElement {
         <input type="text" id="opt-filename" class="option-row__control" value="output.pdf" placeholder="output.pdf" />
       </label>
     </fieldset>
+
+    <!-- Convert -->
+    <div class="options-panel__convert-area">
+      <button class="btn btn--primary" id="opt-convert" type="button" disabled>Convert &amp; Download</button>
+      <p class="options-panel__status" id="opt-status" aria-live="polite"></p>
+    </div>
   `;
 
   function q<T extends HTMLElement>(sel: string): T {
@@ -107,6 +114,11 @@ export function createOptionsPanel(): HTMLElement {
   const orientationRowEl = q<HTMLLabelElement>('#opt-orientation-row');
   const orientationEl = q<HTMLSelectElement>('#opt-orientation');
   const filenameEl = q<HTMLInputElement>('#opt-filename');
+  const convertBtn = q<HTMLButtonElement>('#opt-convert');
+  const statusEl = q<HTMLParagraphElement>('#opt-status');
+
+  // Tracks the locked aspect ratio (W/H); initialized from default values
+  let aspectRatio = 1920 / 1080;
 
   function toggleResizeSubgroups(mode: ResizeMode): void {
     pixelsEl.hidden = mode !== 'pixels';
@@ -117,6 +129,10 @@ export function createOptionsPanel(): HTMLElement {
     orientationRowEl.hidden = size === 'fit';
   }
 
+  function setStatus(msg: string): void {
+    statusEl.textContent = msg;
+  }
+
   modeEl.addEventListener('change', () => {
     const mode = modeEl.value as ResizeMode;
     toggleResizeSubgroups(mode);
@@ -124,15 +140,34 @@ export function createOptionsPanel(): HTMLElement {
   });
 
   wEl.addEventListener('input', () => {
-    store.updateOptions({ resizeWidth: Math.max(1, parseInt(wEl.value) || 1) });
+    const w = Math.max(1, parseInt(wEl.value) || 1);
+    if (lockEl.checked && aspectRatio > 0) {
+      const newH = Math.max(1, Math.round(w / aspectRatio));
+      hEl.value = String(newH);
+      store.updateOptions({ resizeWidth: w, resizeHeight: newH });
+    } else {
+      store.updateOptions({ resizeWidth: w });
+    }
   });
 
   hEl.addEventListener('input', () => {
-    store.updateOptions({ resizeHeight: Math.max(1, parseInt(hEl.value) || 1) });
+    const h = Math.max(1, parseInt(hEl.value) || 1);
+    if (lockEl.checked && aspectRatio > 0) {
+      const newW = Math.max(1, Math.round(h * aspectRatio));
+      wEl.value = String(newW);
+      store.updateOptions({ resizeWidth: newW, resizeHeight: h });
+    } else {
+      store.updateOptions({ resizeHeight: h });
+    }
   });
 
   lockEl.addEventListener('change', () => {
     store.updateOptions({ resizeLockAspect: lockEl.checked });
+    if (lockEl.checked) {
+      const w = parseInt(wEl.value) || 1;
+      const h = parseInt(hEl.value) || 1;
+      if (h > 0) aspectRatio = w / h;
+    }
   });
 
   pctEl.addEventListener('input', () => {
@@ -163,6 +198,39 @@ export function createOptionsPanel(): HTMLElement {
     let name = filenameEl.value.trim() || 'output.pdf';
     if (!name.endsWith('.pdf')) name += '.pdf';
     store.updateOptions({ outputFilename: name });
+  });
+
+  store.subscribe(() => {
+    const { images } = store.getState();
+    convertBtn.disabled = images.length === 0;
+  });
+
+  convertBtn.addEventListener('click', async () => {
+    const { images, options } = store.getState();
+    if (images.length === 0) return;
+
+    convertBtn.disabled = true;
+    setStatus(`Processing 0 / ${images.length}…`);
+
+    try {
+      const blob = await generatePdf(images, options, (done, total) => {
+        setStatus(`Processing ${done} / ${total}…`);
+      });
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = options.outputFilename;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setStatus(`Done — ${images.length} page${images.length !== 1 ? 's' : ''}`);
+    } catch (err) {
+      console.error(err);
+      setStatus('Error: conversion failed. See console.');
+    } finally {
+      convertBtn.disabled = store.getState().images.length === 0;
+    }
   });
 
   // Init visibility

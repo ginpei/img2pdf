@@ -25,12 +25,21 @@ async function init(): Promise<void> {
 
   const content = document.createElement('div');
   content.className = 'main-layout__content';
-  content.appendChild(createDropzone());
-  content.appendChild(createImageList());
+
+  const { element: dropzoneEl, openFilePicker } = createDropzone();
+  content.appendChild(dropzoneEl);
+  content.appendChild(createImageList({ onAdd: openFilePicker }));
 
   main.appendChild(content);
   main.appendChild(createOptionsPanel());
   app.appendChild(main);
+
+  const footer = document.createElement('footer');
+  footer.className = 'site-footer';
+  footer.innerHTML =
+    '© <a href="https://ginpei.dev" target="_blank" rel="noopener noreferrer">Ginpei Takanashi</a>';
+  app.appendChild(footer);
 }
 
 init().catch(console.error);
+
