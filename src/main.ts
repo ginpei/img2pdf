@@ -3,8 +3,9 @@ import { initializeImageMagick } from '@imagemagick/magick-wasm';
 import wasmUrl from '@imagemagick/magick-wasm/magick.wasm?url';
 import { createToolbar } from './ui/toolbar.js';
 import { createDropzone } from './ui/dropzone.js';
-import { createImageList } from './ui/imageList.js';
+import { createImageList, applyExifOrientation } from './ui/imageList.js';
 import { createOptionsPanel } from './ui/optionsPanel.js';
+import { store } from './store.js';
 
 async function init(): Promise<void> {
   const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -34,12 +35,19 @@ async function init(): Promise<void> {
   main.appendChild(createOptionsPanel());
   app.appendChild(main);
 
-  const footer = document.createElement('footer');
-  footer.className = 'site-footer';
-  footer.innerHTML =
-    '© <a href="https://ginpei.dev" target="_blank" rel="noopener noreferrer">Ginpei Takanashi</a>';
-  app.appendChild(footer);
+  // Auto-apply EXIF orientation only to new images
+  const processedFiles = new Set<File>();
+  store.subscribe(() => {
+    const { images } = store.getState();
+    images.forEach((entry) => {
+      if (!processedFiles.has(entry.file)) {
+        processedFiles.add(entry.file);
+        applyExifOrientation(entry.file).catch(console.debug);
+      }
+    });
+  });
 }
 
 init().catch(console.error);
+
 

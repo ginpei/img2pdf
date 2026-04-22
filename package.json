@@ -13,6 +13,7 @@
     "vite": "^8.0.9"
   },
   "dependencies": {
+    "@ginpei/exif-orientation": "^1.2.0",
     "@imagemagick/magick-wasm": "^0.0.40"
   }
 }

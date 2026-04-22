@@ -80,20 +80,27 @@ export function createOptionsPanel(): HTMLElement {
       </label>
     </fieldset>
 
-    <!-- Output -->
-    <fieldset class="options-group">
-      <legend class="options-group__legend">Output</legend>
-      <label class="option-row">
-        <span class="option-row__label">Filename</span>
-        <input type="text" id="opt-filename" class="option-row__control" value="output.pdf" placeholder="output.pdf" />
-      </label>
-    </fieldset>
-
     <!-- Convert -->
     <div class="options-panel__convert-area">
+      <!-- Output -->
+      <fieldset class="options-group">
+        <legend class="options-group__legend">Output</legend>
+        <label class="option-row">
+          <span class="option-row__label">Filename</span>
+          <input type="text" id="opt-filename" class="option-row__control" value="output.pdf" placeholder="output.pdf" />
+        </label>
+      </fieldset>
+
       <button class="btn btn--primary" id="opt-convert" type="button" disabled>Convert &amp; Download</button>
       <p class="options-panel__status" id="opt-status" aria-live="polite"></p>
     </div>
+
+    <!-- Copyright -->
+    <footer class="options-panel__copyright-area">
+      By Ginpei Takanashi
+      @
+      <a href="http://ginpei.dev">ginpei.dev</a>
+    </footer>
   `;
 
   function q<T extends HTMLElement>(sel: string): T {

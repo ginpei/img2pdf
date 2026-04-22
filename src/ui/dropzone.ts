@@ -9,6 +9,11 @@ export function createDropzone(): DropzoneHandle {
   const wrapper = document.createElement('div');
   wrapper.className = 'dropzone-wrapper';
 
+  // Welcome message
+  const welcome = document.createElement('p');
+  welcome.className = 'dropzone__welcome';
+  welcome.textContent = 'This tool converts multiple images into one PDF file. No uploads to anywhere.';
+
   // Full drop zone (shown when no images loaded)
   const zone = document.createElement('div');
   zone.className = 'dropzone';
@@ -29,6 +34,7 @@ export function createDropzone(): DropzoneHandle {
   input.accept = 'image/*';
   input.multiple = true;
   input.style.display = 'none';
+  wrapper.appendChild(welcome);
   wrapper.appendChild(input);
   wrapper.appendChild(zone);
 
@@ -73,6 +79,7 @@ export function createDropzone(): DropzoneHandle {
   store.subscribe(() => {
     const hasImages = store.getState().images.length > 0;
     zone.hidden = hasImages;
+    welcome.hidden = hasImages;
   });
 
   return { element: wrapper, openFilePicker };

@@ -1,5 +1,6 @@
 import { store } from '../store.js';
 import type { ImageEntry, Rotation } from '../types.js';
+import { getOrientation } from '@ginpei/exif-orientation';
 
 interface ImageListOptions {
   onAdd?: () => void;
@@ -92,69 +93,98 @@ export function createImageList(options: ImageListOptions = {}): HTMLElement {
 function createItem(entry: ImageEntry, idx: number, total: number): HTMLLIElement {
   const li = document.createElement('li');
   li.className = 'image-item';
-  li.draggable = true;
   li.dataset['id'] = entry.id;
 
-  li.innerHTML = `
-    <span class="image-item__drag-handle" title="Drag to reorder">⠿</span>
-    <img class="image-item__thumb" src="${entry.objectUrl}" alt="${entry.file.name}" loading="lazy" />
-    <span class="image-item__name" title="${entry.file.name}">${entry.file.name}</span>
-    <span class="image-item__page">p.${idx + 1}/${total}</span>
-    <button class="btn btn--ghost btn--sm image-item__rotate-btn" type="button" title="Rotate 90° clockwise">⤸ <span>${entry.rotate}°</span></button>
-    <button class="btn btn--ghost btn--sm image-item__remove" type="button" title="Remove">✕</button>
-  `;
+  const thumbImg = document.createElement('img');
+  thumbImg.className = 'image-item__thumb';
+  thumbImg.src = entry.objectUrl;
+  thumbImg.alt = entry.file.name;
+  thumbImg.loading = 'lazy';
+  // Apply rotation transform: CSS = user_rotate only (EXIF is already baked in by browser)
+  if (entry.rotate > 0) {
+    thumbImg.style.transform = `rotate(${entry.rotate}deg)`;
+  }
 
-  li.querySelector<HTMLButtonElement>('.image-item__rotate-btn')!.addEventListener('click', () => {
+  const infoDiv = document.createElement('div');
+  infoDiv.className = 'image-item__info';
+
+  const name = document.createElement('span');
+  name.className = 'image-item__name';
+  name.textContent = entry.file.name;
+  name.title = entry.file.name;
+
+  const page = document.createElement('span');
+  page.className = 'image-item__page';
+  page.textContent = `Page ${idx + 1} of ${total}`;
+
+  const controlsDiv = document.createElement('div');
+  controlsDiv.className = 'image-item__controls';
+
+  const rotateBtn = document.createElement('button');
+  rotateBtn.className = 'btn btn--ghost btn--sm image-item__rotate-btn';
+  rotateBtn.type = 'button';
+  rotateBtn.title = 'Rotate 90° clockwise';
+  rotateBtn.innerHTML = `⤸ <span>${entry.rotate}°</span>`;
+  rotateBtn.addEventListener('click', () => {
     const newRotate = ((entry.rotate + 90) % 360) as Rotation;
     store.updateImageRotate(entry.id, newRotate);
   });
 
-  li.querySelector<HTMLButtonElement>('.image-item__remove')!.addEventListener('click', () => {
+  const moveUpBtn = document.createElement('button');
+  moveUpBtn.className = 'btn btn--ghost btn--sm image-item__move-btn';
+  moveUpBtn.type = 'button';
+  moveUpBtn.textContent = '↑';
+  moveUpBtn.title = 'Move up';
+  moveUpBtn.disabled = idx === 0;
+  moveUpBtn.addEventListener('click', () => store.reorderImages(idx, idx - 1));
+
+  const moveDownBtn = document.createElement('button');
+  moveDownBtn.className = 'btn btn--ghost btn--sm image-item__move-btn';
+  moveDownBtn.type = 'button';
+  moveDownBtn.textContent = '↓';
+  moveDownBtn.title = 'Move down';
+  moveDownBtn.disabled = idx === total - 1;
+  moveDownBtn.addEventListener('click', () => store.reorderImages(idx, idx + 1));
+
+  const removeBtn = document.createElement('button');
+  removeBtn.className = 'btn btn--ghost btn--sm image-item__remove';
+  removeBtn.type = 'button';
+  removeBtn.textContent = '✕';
+  removeBtn.title = 'Remove';
+  removeBtn.addEventListener('click', () => {
     store.removeImage(entry.id);
   });
 
-  // Drag-to-reorder: use dataTransfer to pass source index across items
-  li.addEventListener('dragstart', (e) => {
-    e.dataTransfer!.effectAllowed = 'move';
-    e.dataTransfer!.setData('text/plain', String(idx));
-    li.classList.add('image-item--dragging');
-  });
+  infoDiv.appendChild(name);
+  infoDiv.appendChild(page);
 
-  li.addEventListener('dragend', () => {
-    li.classList.remove('image-item--dragging');
-    document.querySelectorAll('.image-item--dragover').forEach((el) => {
-      el.classList.remove('image-item--dragover');
-    });
-  });
+  controlsDiv.appendChild(rotateBtn);
+  controlsDiv.appendChild(moveUpBtn);
+  controlsDiv.appendChild(moveDownBtn);
 
-  li.addEventListener('dragover', (e) => {
-    // Only show drop target for reorder drags, not OS file drops
-    if (!e.dataTransfer?.types.includes('Files')) {
-      e.preventDefault();
-      e.dataTransfer!.dropEffect = 'move';
-      li.classList.add('image-item--dragover');
-    }
-  });
+  infoDiv.appendChild(controlsDiv);
+  infoDiv.appendChild(removeBtn);  // Position at top-right via CSS absolute
 
-  li.addEventListener('dragleave', () => {
-    li.classList.remove('image-item--dragover');
-  });
-
-  li.addEventListener('drop', (e) => {
-    li.classList.remove('image-item--dragover');
-    if (e.dataTransfer?.types.includes('Files')) {
-      // OS file drop — prevent default but let it bubble to container
-      e.preventDefault();
-      return;
-    }
-    e.preventDefault();
-    e.stopPropagation();
-    const fromIdx = parseInt(e.dataTransfer!.getData('text/plain'));
-    if (!isNaN(fromIdx) && fromIdx !== idx) {
-      store.reorderImages(fromIdx, idx);
-    }
-  });
+  li.appendChild(thumbImg);
+  li.appendChild(infoDiv);
 
   return li;
 }
 
+// Auto-detect and apply EXIF orientation on file load
+export async function applyExifOrientation(file: File): Promise<void> {
+  if (!file.type.startsWith('image/')) return;
+
+  try {
+    const info = await getOrientation(file);
+    if (info) {
+      const entry = store.getState().images.find((e) => e.file === file);
+      if (entry) {
+        // Store the original EXIF orientation
+        store.updateImageExifOrientation(entry.id, info.rotation);
+      }
+    }
+  } catch (err) {
+    console.debug('EXIF read error:', err);
+  }
+}

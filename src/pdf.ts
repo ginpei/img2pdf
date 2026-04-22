@@ -59,9 +59,10 @@ export async function generatePdf(
     const bytes = await fileToBytes(entry.file);
 
     const processed = ImageMagick.read(bytes, (img) => {
-      // Rotate
-      if (entry.rotate !== 0) {
-        img.rotate(entry.rotate);
+      // Rotate: ImageMagick operates on raw image, so we add EXIF orientation + user rotation
+      const totalRotation = (entry.exifOrientation + entry.rotate) % 360;
+      if (totalRotation !== 0) {
+        img.rotate(totalRotation);
       }
 
       // Resize

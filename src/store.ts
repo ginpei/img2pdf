@@ -36,6 +36,7 @@ function addImages(files: File[]): void {
       file: f,
       objectUrl: URL.createObjectURL(f),
       rotate: 0 as Rotation,
+      exifOrientation: 0,
     }));
   state.images = [...state.images, ...newEntries];
   notify();
@@ -68,6 +69,11 @@ function updateImageRotate(id: string, rotate: Rotation): void {
   notify();
 }
 
+function updateImageExifOrientation(id: string, exifOrientation: number): void {
+  state.images = state.images.map((e) => (e.id === id ? { ...e, exifOrientation } : e));
+  notify();
+}
+
 function updateOptions(patch: Partial<GlobalOptions>): void {
   state.options = { ...state.options, ...patch };
   notify();
@@ -88,6 +94,7 @@ export const store = {
   clearImages,
   reorderImages,
   updateImageRotate,
+  updateImageExifOrientation,
   updateOptions,
   sortImagesByName,
 };

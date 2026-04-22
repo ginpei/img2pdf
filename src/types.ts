@@ -8,6 +8,7 @@ export interface ImageEntry {
   file: File;
   objectUrl: string;
   rotate: Rotation;
+  exifOrientation: number; // 0=no EXIF, or 90/180/270
 }
 
 export interface GlobalOptions {
