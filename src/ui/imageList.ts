@@ -6,6 +6,10 @@ interface ImageListOptions {
   onAdd?: () => void;
 }
 
+// Track which item was just moved for animation
+let movedItemId: string | null = null;
+let moveDirection: 'up' | 'down' | null = null;
+
 export function createImageList(options: ImageListOptions = {}): HTMLElement {
   const container = document.createElement('div');
   container.className = 'image-list-wrap';
@@ -95,6 +99,17 @@ function createItem(entry: ImageEntry, idx: number, total: number): HTMLLIElemen
   li.className = 'image-item';
   li.dataset['id'] = entry.id;
 
+  // Add animation class if this item just moved
+  if (movedItemId === entry.id) {
+    const direction = moveDirection === 'down' ? 'slideInFromDown' : 'slideInFromUp';
+    li.classList.add(direction);
+    // Clear the flag after animation completes
+    setTimeout(() => {
+      movedItemId = null;
+      moveDirection = null;
+    }, 300);
+  }
+
   const thumbImg = document.createElement('img');
   thumbImg.className = 'image-item__thumb';
   thumbImg.src = entry.objectUrl;
@@ -136,7 +151,11 @@ function createItem(entry: ImageEntry, idx: number, total: number): HTMLLIElemen
   moveUpBtn.textContent = '↑';
   moveUpBtn.title = 'Move up';
   moveUpBtn.disabled = idx === 0;
-  moveUpBtn.addEventListener('click', () => store.reorderImages(idx, idx - 1));
+  moveUpBtn.addEventListener('click', () => {
+    movedItemId = entry.id;
+    moveDirection = 'up';
+    store.reorderImages(idx, idx - 1);
+  });
 
   const moveDownBtn = document.createElement('button');
   moveDownBtn.className = 'btn btn--ghost btn--sm image-item__move-btn';
@@ -144,7 +163,11 @@ function createItem(entry: ImageEntry, idx: number, total: number): HTMLLIElemen
   moveDownBtn.textContent = '↓';
   moveDownBtn.title = 'Move down';
   moveDownBtn.disabled = idx === total - 1;
-  moveDownBtn.addEventListener('click', () => store.reorderImages(idx, idx + 1));
+  moveDownBtn.addEventListener('click', () => {
+    movedItemId = entry.id;
+    moveDirection = 'down';
+    store.reorderImages(idx, idx + 1);
+  });
 
   const removeBtn = document.createElement('button');
   removeBtn.className = 'btn btn--ghost btn--sm image-item__remove';
@@ -152,7 +175,10 @@ function createItem(entry: ImageEntry, idx: number, total: number): HTMLLIElemen
   removeBtn.textContent = '✕';
   removeBtn.title = 'Remove';
   removeBtn.addEventListener('click', () => {
-    store.removeImage(entry.id);
+    li.classList.add('image-item--removing');
+    li.addEventListener('animationend', () => {
+      store.removeImage(entry.id);
+    }, { once: true });
   });
 
   infoDiv.appendChild(name);

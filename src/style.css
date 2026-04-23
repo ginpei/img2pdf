@@ -164,10 +164,46 @@ a { color: #00f; }
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  transition: opacity .15s, transform 0.2s ease-out;
 }
 .image-item--dragging { opacity: .4; }
 .image-item--dragover { border-color: var(--color-primary); }
+.slideInFromDown {
+  animation: slideInDown 0.3s cubic-bezier(.4,1.4,.6,1);
+}
+.slideInFromUp {
+  animation: slideInUp 0.3s cubic-bezier(.4,1.4,.6,1);
+}
+.image-item--removing {
+  animation: fadeOutShrink .3s linear forwards;
+}
+
+@keyframes slideInDown {
+  from {
+    opacity: 0.5;
+    transform: translateY(-3rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0.5;
+    transform: translateY(3rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeOutShrink {
+  0% { opacity: 1; }
+  50% { opacity: 0; height: auto; padding: .75rem; border-width: 1px; }
+  100% { opacity: 0; height: 0; padding: 0; border-width: 0; margin-bottom: -0.5rem; }
+}
 
 .image-item__drag-handle {
   cursor: grab; color: var(--color-text-muted);
