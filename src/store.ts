@@ -6,7 +6,19 @@ interface State {
   options: GlobalOptions;
 }
 
-type Listener = () => void;
+export type StoreEventKind =
+  | 'images:add'
+  | 'images:remove'
+  | 'images:clear'
+  | 'images:reorder'
+  | 'images:update'
+  | 'options:update';
+
+export interface StoreEvent {
+  kind: StoreEventKind;
+}
+
+type Listener = (event: StoreEvent) => void;
 
 const state: State = {
   images: [],
@@ -20,8 +32,8 @@ function subscribe(fn: Listener): () => void {
   return () => listeners.delete(fn);
 }
 
-function notify(): void {
-  listeners.forEach((fn) => fn());
+function notify(event: StoreEvent): void {
+  listeners.forEach((fn) => fn(event));
 }
 
 function getState(): Readonly<State> {
@@ -39,20 +51,20 @@ function addImages(files: File[]): void {
       exifOrientation: 0,
     }));
   state.images = [...state.images, ...newEntries];
-  notify();
+  notify({ kind: 'images:add' });
 }
 
 function removeImage(id: string): void {
   const entry = state.images.find((e) => e.id === id);
   if (entry) URL.revokeObjectURL(entry.objectUrl);
   state.images = state.images.filter((e) => e.id !== id);
-  notify();
+  notify({ kind: 'images:remove' });
 }
 
 function clearImages(): void {
   state.images.forEach((e) => URL.revokeObjectURL(e.objectUrl));
   state.images = [];
-  notify();
+  notify({ kind: 'images:clear' });
 }
 
 function reorderImages(fromIdx: number, toIdx: number): void {
@@ -61,29 +73,29 @@ function reorderImages(fromIdx: number, toIdx: number): void {
   const [moved] = imgs.splice(fromIdx, 1);
   imgs.splice(toIdx, 0, moved);
   state.images = imgs;
-  notify();
+  notify({ kind: 'images:reorder' });
 }
 
 function updateImageRotate(id: string, rotate: Rotation): void {
   state.images = state.images.map((e) => (e.id === id ? { ...e, rotate } : e));
-  notify();
+  notify({ kind: 'images:update' });
 }
 
 function updateImageExifOrientation(id: string, exifOrientation: number): void {
   state.images = state.images.map((e) => (e.id === id ? { ...e, exifOrientation } : e));
-  notify();
+  notify({ kind: 'images:update' });
 }
 
 function updateOptions(patch: Partial<GlobalOptions>): void {
   state.options = { ...state.options, ...patch };
-  notify();
+  notify({ kind: 'options:update' });
 }
 
 function sortImagesByName(): void {
   state.images = [...state.images].sort((a, b) =>
     a.file.name.localeCompare(b.file.name, undefined, { numeric: true, sensitivity: 'base' }),
   );
-  notify();
+  notify({ kind: 'images:reorder' });
 }
 
 export const store = {

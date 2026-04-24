@@ -20,6 +20,12 @@ async function fileToBytes(file: File): Promise<Uint8Array> {
   return new Uint8Array(buf);
 }
 
+export interface PdfSource {
+  bytes: Uint8Array;
+  rotate: number;
+  exifOrientation: number;
+}
+
 /**
  * Build a MagickImageCollection without triggering the "dispose on read()"
  * behaviour present in magick-wasm ≤ 0.0.40. The trick is to splice() the
@@ -51,16 +57,34 @@ export async function generatePdf(
   options: GlobalOptions,
   onProgress?: (done: number, total: number) => void,
 ): Promise<Blob> {
+  const sources: PdfSource[] = [];
+  for (const entry of images) {
+    sources.push({
+      bytes: await fileToBytes(entry.file),
+      rotate: entry.rotate,
+      exifOrientation: entry.exifOrientation,
+    });
+  }
+  const pdfBytes = generatePdfFromSources(sources, options, onProgress);
+  const pdfCopy = new Uint8Array(pdfBytes.byteLength);
+  pdfCopy.set(pdfBytes);
+  return new Blob([pdfCopy], { type: 'application/pdf' });
+}
+
+export function generatePdfFromSources(
+  sources: PdfSource[],
+  options: GlobalOptions,
+  onProgress?: (done: number, total: number) => void,
+): Uint8Array {
   const processedBytesArray: Uint8Array[] = [];
 
-  for (let i = 0; i < images.length; i++) {
-    onProgress?.(i, images.length);
-    const entry = images[i];
-    const bytes = await fileToBytes(entry.file);
+  for (let i = 0; i < sources.length; i++) {
+    onProgress?.(i, sources.length);
+    const source = sources[i];
 
-    const processed = ImageMagick.read(bytes, (img) => {
+    const processed = ImageMagick.read(source.bytes, (img) => {
       // Rotate: ImageMagick operates on raw image, so we add EXIF orientation + user rotation
-      const totalRotation = (entry.exifOrientation + entry.rotate) % 360;
+      const totalRotation = (source.exifOrientation + source.rotate) % 360;
       if (totalRotation !== 0) {
         img.rotate(totalRotation);
       }
@@ -113,12 +137,11 @@ export async function generatePdf(
     processedBytesArray.push(processed);
   }
 
-  onProgress?.(images.length, images.length);
+  onProgress?.(sources.length, sources.length);
 
   const collection = buildCollectionFromBytesArray(processedBytesArray);
   try {
-    const pdfBytes = collection.write(MagickFormat.Pdf, (data) => new Uint8Array(data));
-    return new Blob([pdfBytes], { type: 'application/pdf' });
+    return collection.write(MagickFormat.Pdf, (data) => new Uint8Array(data));
   } finally {
     collection.dispose();
   }

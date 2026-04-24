@@ -1,6 +1,32 @@
 import { store } from '../store.js';
-import { generatePdf } from '../pdf.js';
-import type { Orientation, PageSize, ResizeMode } from '../types.js';
+import type { GlobalOptions, ImageEntry, Orientation, PageSize, ResizeMode } from '../types.js';
+
+interface WorkerImageSource {
+  bytes: ArrayBuffer;
+  rotate: number;
+  exifOrientation: number;
+}
+
+interface WorkerProgressMessage {
+  type: 'progress';
+  requestId: number;
+  done: number;
+  total: number;
+}
+
+interface WorkerResultMessage {
+  type: 'result';
+  requestId: number;
+  pdfBytes: ArrayBuffer;
+}
+
+interface WorkerErrorMessage {
+  type: 'error';
+  requestId: number;
+  message: string;
+}
+
+type WorkerResponseMessage = WorkerProgressMessage | WorkerResultMessage | WorkerErrorMessage;
 
 export function createOptionsPanel(): HTMLElement {
   const panel = document.createElement('aside');
@@ -126,6 +152,130 @@ export function createOptionsPanel(): HTMLElement {
 
   // Tracks the locked aspect ratio (W/H); initialized from default values
   let aspectRatio = 1920 / 1080;
+  let latestPdfSizeBytes: number | null = null;
+  let previewTimer: number | null = null;
+  let previewRunId = 0;
+  let workerRequestId = 0;
+  let cachedPdf: { key: string; blob: Blob } | null = null;
+  let inflightGeneration: { key: string; promise: Promise<Blob> } | null = null;
+
+  const pdfWorker = new Worker(new URL('../pdf.worker.ts', import.meta.url), { type: 'module' });
+
+  function makeGenerationKey(images: ImageEntry[], options: GlobalOptions): string {
+    const optionsKey = JSON.stringify({
+      resizeMode: options.resizeMode,
+      resizeWidth: options.resizeWidth,
+      resizeHeight: options.resizeHeight,
+      resizeLockAspect: options.resizeLockAspect,
+      resizePercent: options.resizePercent,
+      quality: options.quality,
+      grayscale: options.grayscale,
+      pageSize: options.pageSize,
+      orientation: options.orientation,
+    });
+    const imagesKey = images
+      .map((image) =>
+        [
+          image.file.name,
+          image.file.size,
+          image.file.lastModified,
+          image.file.type,
+          image.rotate,
+          image.exifOrientation,
+        ].join('|'),
+      )
+      .join('||');
+    return `${optionsKey}::${imagesKey}`;
+  }
+
+  async function createWorkerSources(images: ImageEntry[]): Promise<WorkerImageSource[]> {
+    return Promise.all(
+      images.map(async (image) => ({
+        bytes: await image.file.arrayBuffer(),
+        rotate: image.rotate,
+        exifOrientation: image.exifOrientation,
+      })),
+    );
+  }
+
+  async function generatePdfInWorker(
+    images: ImageEntry[],
+    options: GlobalOptions,
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<Blob> {
+    const sources = await createWorkerSources(images);
+    const requestId = ++workerRequestId;
+
+    return new Promise<Blob>((resolve, reject) => {
+      const handleMessage = (event: MessageEvent<WorkerResponseMessage>): void => {
+        const data = event.data;
+        if (data.requestId !== requestId) return;
+
+        if (data.type === 'progress') {
+          onProgress?.(data.done, data.total);
+          return;
+        }
+
+        pdfWorker.removeEventListener('message', handleMessage);
+        if (data.type === 'result') {
+          resolve(new Blob([data.pdfBytes], { type: 'application/pdf' }));
+          return;
+        }
+        reject(new Error(data.message));
+      };
+
+      pdfWorker.addEventListener('message', handleMessage);
+      pdfWorker.postMessage(
+        {
+          type: 'generate',
+          requestId,
+          images: sources,
+          options,
+        },
+        sources.map((source) => source.bytes),
+      );
+    });
+  }
+
+  async function ensurePdfBlob(
+    key: string,
+    images: ImageEntry[],
+    options: GlobalOptions,
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<Blob> {
+    if (cachedPdf && cachedPdf.key === key) {
+      return cachedPdf.blob;
+    }
+    if (inflightGeneration && inflightGeneration.key === key) {
+      return inflightGeneration.promise;
+    }
+
+    const promise = generatePdfInWorker(images, options, onProgress)
+      .then((blob) => {
+        cachedPdf = { key, blob };
+        return blob;
+      })
+      .finally(() => {
+        if (inflightGeneration?.key === key) {
+          inflightGeneration = null;
+        }
+      });
+
+    inflightGeneration = { key, promise };
+    return promise;
+  }
+
+  function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    const units = ['KB', 'MB', 'GB'];
+    let value = bytes / 1024;
+    let unitIdx = 0;
+    while (value >= 1024 && unitIdx < units.length - 1) {
+      value /= 1024;
+      unitIdx++;
+    }
+    return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIdx]}`;
+  }
 
   function toggleResizeSubgroups(mode: ResizeMode): void {
     pixelsEl.hidden = mode !== 'pixels';
@@ -136,8 +286,55 @@ export function createOptionsPanel(): HTMLElement {
     orientationRowEl.hidden = size === 'fit';
   }
 
-  function setStatus(msg: string): void {
-    statusEl.textContent = msg;
+  function setStatus(msg: string, showPdfSize = true): void {
+    if (!msg) {
+      statusEl.textContent = '';
+      return;
+    }
+    const sizeText = showPdfSize && latestPdfSizeBytes !== null ? ` · PDF ${formatBytes(latestPdfSizeBytes)}` : '';
+    statusEl.textContent = `${msg}${sizeText}`;
+  }
+
+  function schedulePreview(): void {
+    if (previewTimer !== null) {
+      window.clearTimeout(previewTimer);
+    }
+    previewTimer = window.setTimeout(() => {
+      previewTimer = null;
+      void runPreview();
+    }, 250);
+  }
+
+  async function runPreview(): Promise<void> {
+    const runId = ++previewRunId;
+    const { images, options } = store.getState();
+    if (images.length === 0) {
+      latestPdfSizeBytes = null;
+      setStatus('');
+      return;
+    }
+
+    const key = makeGenerationKey(images, options);
+    if (cachedPdf && cachedPdf.key === key) {
+      latestPdfSizeBytes = cachedPdf.blob.size;
+      setStatus(`Estimated ${images.length} page${images.length !== 1 ? 's' : ''}`);
+      return;
+    }
+
+    setStatus(`Estimating ${0} / ${images.length}…`, false);
+    try {
+      const blob = await ensurePdfBlob(key, images, options, (done, total) => {
+        if (runId !== previewRunId) return;
+        setStatus(`Estimating ${done} / ${total}…`, false);
+      });
+      if (runId !== previewRunId) return;
+      latestPdfSizeBytes = blob.size;
+      setStatus(`Estimated ${images.length} page${images.length !== 1 ? 's' : ''}`);
+    } catch (err) {
+      if (runId !== previewRunId) return;
+      console.error(err);
+      setStatus('Estimate failed');
+    }
   }
 
   modeEl.addEventListener('change', () => {
@@ -207,22 +404,32 @@ export function createOptionsPanel(): HTMLElement {
     store.updateOptions({ outputFilename: name });
   });
 
-  store.subscribe(() => {
+  store.subscribe((event) => {
     const { images } = store.getState();
     convertBtn.disabled = images.length === 0;
+    if (images.length === 0) {
+      latestPdfSizeBytes = null;
+      setStatus('');
+      return;
+    }
+    if (event.kind !== 'images:reorder') {
+      schedulePreview();
+    }
   });
 
   convertBtn.addEventListener('click', async () => {
     const { images, options } = store.getState();
     if (images.length === 0) return;
+    const key = makeGenerationKey(images, options);
 
     convertBtn.disabled = true;
-    setStatus(`Processing 0 / ${images.length}…`);
+    setStatus(`Processing 0 / ${images.length}…`, false);
 
     try {
-      const blob = await generatePdf(images, options, (done, total) => {
-        setStatus(`Processing ${done} / ${total}…`);
+      const blob = await ensurePdfBlob(key, images, options, (done, total) => {
+        setStatus(`Processing ${done} / ${total}…`, false);
       });
+      latestPdfSizeBytes = blob.size;
 
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -243,6 +450,7 @@ export function createOptionsPanel(): HTMLElement {
   // Init visibility
   toggleResizeSubgroups('none');
   toggleOrientationRow('fit');
+  void runPreview();
 
   return panel;
 }
