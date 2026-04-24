@@ -7,18 +7,13 @@ import {
   MagickImageCollection,
 } from '@imagemagick/magick-wasm';
 import type { IMagickImage } from '@imagemagick/magick-wasm';
-import type { GlobalOptions, ImageEntry } from './types.js';
+import type { GlobalOptions } from './types.js';
 
 // Page dimensions in pixels at 96 DPI
 const PAGE_DIMENSIONS: Record<string, [number, number]> = {
   a4: [794, 1123],      // 210×297mm at 96dpi
   letter: [816, 1056],  // 8.5×11in at 96dpi
 };
-
-async function fileToBytes(file: File): Promise<Uint8Array> {
-  const buf = await file.arrayBuffer();
-  return new Uint8Array(buf);
-}
 
 export interface PdfSource {
   bytes: Uint8Array;
@@ -50,25 +45,6 @@ function buildCollectionFromBytesArray(bytesArray: Uint8Array[]): ReturnType<typ
   // Restore all accumulated images into the collection in page order.
   collection.push(...saved);
   return collection;
-}
-
-export async function generatePdf(
-  images: ImageEntry[],
-  options: GlobalOptions,
-  onProgress?: (done: number, total: number) => void,
-): Promise<Blob> {
-  const sources: PdfSource[] = [];
-  for (const entry of images) {
-    sources.push({
-      bytes: await fileToBytes(entry.file),
-      rotate: entry.rotate,
-      exifOrientation: entry.exifOrientation,
-    });
-  }
-  const pdfBytes = generatePdfFromSources(sources, options, onProgress);
-  const pdfCopy = new Uint8Array(pdfBytes.byteLength);
-  pdfCopy.set(pdfBytes);
-  return new Blob([pdfCopy], { type: 'application/pdf' });
 }
 
 export function generatePdfFromSources(
